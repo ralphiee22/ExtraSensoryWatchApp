@@ -2,7 +2,7 @@
 
 static Window *window;	
 static TextLayer *s_output_layer;	
-static int counter = 0;
+static char temp[24];
 
 // Key values for AppMessage Dictionary
 enum {
@@ -10,84 +10,126 @@ enum {
 	MESSAGE_KEY = 42
 };
 
-// // Write message to buffer & send
-// void send_message(cstring str){
-// 	DictionaryIterator *iter;
+char *translate_error(AppMessageResult result) {
+  switch (result) {
+    case APP_MSG_OK: return "APP_MSG_OK";
+    case APP_MSG_SEND_TIMEOUT: return "APP_MSG_SEND_TIMEOUT";
+    case APP_MSG_SEND_REJECTED: return "APP_MSG_SEND_REJECTED";
+    case APP_MSG_NOT_CONNECTED: return "APP_MSG_NOT_CONNECTED";
+    case APP_MSG_APP_NOT_RUNNING: return "APP_MSG_APP_NOT_RUNNING";
+    case APP_MSG_INVALID_ARGS: return "APP_MSG_INVALID_ARGS";
+    case APP_MSG_BUSY: return "APP_MSG_BUSY";
+    case APP_MSG_BUFFER_OVERFLOW: return "APP_MSG_BUFFER_OVERFLOW";
+    case APP_MSG_ALREADY_RELEASED: return "APP_MSG_ALREADY_RELEASED";
+    case APP_MSG_CALLBACK_ALREADY_REGISTERED: return "APP_MSG_CALLBACK_ALREADY_REGISTERED";
+    case APP_MSG_CALLBACK_NOT_REGISTERED: return "APP_MSG_CALLBACK_NOT_REGISTERED";
+    case APP_MSG_OUT_OF_MEMORY: return "APP_MSG_OUT_OF_MEMORY";
+    case APP_MSG_CLOSED: return "APP_MSG_CLOSED";
+    case APP_MSG_INTERNAL_ERROR: return "APP_MSG_INTERNAL_ERROR";
+    default: return "UNKNOWN ERROR";
+  }
+}
+
+// Write message to buffer & send
+void send_message(char *str){
+	DictionaryIterator *iter;
 	
-// 	app_message_outbox_begin(&iter);
-// 	dict_write_cstring(iter, MESSAGE_KEY, "YES");
+	app_message_outbox_begin(&iter);
+	dict_write_cstring(iter, MESSAGE_KEY, str);
 	
-// 	dict_write_end(iter);
-//   	app_message_outbox_send();
-// }
+	dict_write_end(iter);
+  	app_message_outbox_send();
+}
 
 // data handler to recieve accel data from watch
 static void data_handler(AccelData *data, uint32_t num_samples) {
-  // Long lived buffer
-  static char s_buffer[128];
-  counter++;
-  if(counter <= 20) {
+  if(num_samples == 0){
+    return;
+  }
+   AccelData* d = data;
   
-  // Compose string of all data for 3 samples
-  snprintf(s_buffer, sizeof(s_buffer), 
-    "N X,Y,Z\n0 %d,%d,%d\n1 %d,%d,%d\n2 %d,%d,%d\n3 %d", 
-    data[0].x, data[0].y, data[0].z, 
-    data[1].x, data[1].y, data[1].z, 
-    data[2].x, data[2].y, data[2].z, counter
-  );
+//   // Prepare dictionary
+   DictionaryIterator *iterator;
+   app_message_outbox_begin(&iterator);
     
+   for(uint8_t i = 0; i < num_samples; i++, d++) {
+      snprintf(temp, 24, "%d,%d,%d", d->x, d->y, d->z);
+      dict_write_cstring(iterator, i , temp);     
+   }  
+  //dict_write_cstring(iterator, 1, s_buffer);
+   app_message_outbox_send();
   }
-  
-  if(counter == 60) {
-    counter = 0;
-   uint32_t timeout_ms = 20000;
-   app_timer_register(timeout_ms, turn_off_accel_collection, NULL);
-  }
 
-  //Show the data
-  text_layer_set_text(s_output_layer, s_buffer);
-}
-
-
-static void turn_off_accel_collection(void* data) {
-    accel_data_service_unsubscribe();
-    uint32_t timeout_ms = 40000;
-    app_timer_register(timeout_ms, turn_on_accel_collection, NULL);
-
-}
-
-static void turn_on_accel_collection(void* data) {
-    // subscribe to the accel data 
-    uint32_t num_samples = 25;
-    accel_data_service_subscribe(num_samples, data_handler);
-    accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
-}
+// void turnOnAccelCollection()
+//   {
+//   // subscribe to the accel data 
+//   uint32_t num_samples = 25;
+//   accel_data_service_subscribe(num_samples, data_handler);
+//   accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
+// }
 
 // Called when a message is received from iPhone
-static void in_received_handler(DictionaryIterator *received, void *context) {
-	Tuple *tuple;
-	
-	tuple = dict_find(received, STATUS_KEY);
-	if(tuple) {
-		APP_LOG(APP_LOG_LEVEL_DEBUG, "Received Status: %d", (int)tuple->value->uint32); 
-	}
-	
-	tuple = dict_find(received, MESSAGE_KEY);
-	if(tuple) {
-      text_layer_set_text(s_output_layer, tuple->value->cstring);
-		APP_LOG(APP_LOG_LEVEL_DEBUG, "Received Message: %s", tuple->value->cstring);
-	}
+static void in_received_handler(DictionaryIterator *iterator, void *context) {
+    // Get the first pair
+  Tuple *t = dict_read_first(iterator);
+
+  // Process all pairs present
+  while(t != NULL) {
+    // Process this pair's key
+    switch (t->key) {
+      case 1:
+        APP_LOG(APP_LOG_LEVEL_INFO, "KEY DATA: %d", (int)t->key);
+        APP_LOG(APP_LOG_LEVEL_INFO, "KEY_DATA received with value %s", t->value->cstring);
+      if(strcmp(t->value->cstring, "TURN OFF") == 0)
+      {
+//         APP_LOG(APP_LOG_LEVEL_DEBUG, "Function went to unsubscribe."); 
+         APP_LOG(APP_LOG_LEVEL_DEBUG, "UPDATES WENT TO 0"); 
+
+//         accel_data_service_unsubscribe();
+          accel_service_set_samples_per_update(0);
+    }
+      if(strcmp(t->value->cstring, "TURN ON") == 0)
+      {
+         APP_LOG(APP_LOG_LEVEL_DEBUG, "UPDATES WENT TO 25"); 
+        accel_service_set_samples_per_update(25);
+    }
+        break;
+      case 2:
+        APP_LOG(APP_LOG_LEVEL_INFO, "KEY DATA: %d", (int)t->key);
+        APP_LOG(APP_LOG_LEVEL_INFO, "KEY_DATA received with value %s", t->value->cstring);
+      text_layer_set_text(s_output_layer, t->value->cstring);
+    }
+
+    // Get next pair, if any
+    t = dict_read_next(iterator);
+  }
+}
+
+static void out_sent_handler(DictionaryIterator *sent, void *context) {
+    // outgoing message was delivered
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "DICTIONARY SENT SUCCESSFULLY!");
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "Size of Dict: %d", (int)dict_size(sent));
+
+}
+
+static void out_failed_handler(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+    // outgoing message failed
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "DICTIONARY NOT SENT! ERROR!");
+   //APP_LOG(APP_LOG_LEVEL_DEBUG, "In dropped: %i - %s", reason, translate_error(reason));
 }
 
 // when message is recieved, click up button to confirm activity
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
-  text_layer_set_text(s_output_layer, "Confirmed as yes!");
-  
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "UP Button Pressed!");
+  text_layer_set_text(s_output_layer, "Confirmed as yes! Waiting for new message...");
+  send_message("YES");
 }
 
 // when message is recieved, click down button to confirm it was not activity
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
-  text_layer_set_text(s_output_layer, "Confirmed as no!");
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "DOWN Button Pressed!");
+  text_layer_set_text(s_output_layer, "Not now! Waiting for new message...");
+  send_message("NO");
 }
 
 static void click_config_provider(void *context) {
@@ -98,10 +140,7 @@ static void click_config_provider(void *context) {
 
 // Called when an incoming message from iPhone is dropped
 static void in_dropped_handler(AppMessageResult reason, void *context) {	
-}
-
-// Called when iPhone does not acknowledge receipt of a message
-static void out_failed_handler(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Incoming message was dropped!");
 }
 
 static void main_window_load(Window *window) {
@@ -141,28 +180,28 @@ void init(void) {
 	// Register AppMessage handlers
 	app_message_register_inbox_received(in_received_handler); 
 	app_message_register_inbox_dropped(in_dropped_handler); 
+  app_message_register_outbox_sent(out_sent_handler);
 	app_message_register_outbox_failed(out_failed_handler);
   
   // subscribe to the accel data 
   uint32_t num_samples = 25;
   accel_data_service_subscribe(num_samples, data_handler);
   accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
-  
-  //subscribe to a timer
-  uint32_t timeout_ms = 20000;
-  app_timer_register(timeout_ms, turn_off_accel_collection, NULL);
-		
+
 	app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+  app_comm_set_sniff_interval(SNIFF_INTERVAL_REDUCED);
 	}
 
 void deinit(void) {
 	app_message_deregister_callbacks();
   accel_data_service_unsubscribe();
+  app_comm_set_sniff_interval(SNIFF_INTERVAL_NORMAL);
 	window_destroy(window);
 }
 
 int main( void ) {
 	init();
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Done initializing, pushed window: %p", window);
 	app_event_loop();
 	deinit();
 }
